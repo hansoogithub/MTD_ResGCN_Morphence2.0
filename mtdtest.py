@@ -29,14 +29,14 @@ class ColorPerturbation(object):
 
 data_augmentation_transformations = T.Compose([
     ColorPerturbation(0.2),
-    T.RandomJitter(0.03),  # Parameters for RandomJitter
-    T.RandomFlip(0.5),  # Parameters for RandomFlip
-    T.RandomScale((0.8, 1.2)),  # Parameters for RandomScale
-    T.RandomRotate(degrees=30, axis=0),  # Parameters for RandomRotate
+    T.RandomJitter(0.03), 
+    T.RandomFlip(0.5),
+    T.RandomScale((0.8, 1.2)),  
+    T.RandomRotate(degrees=30, axis=0), 
     T.RandomRotate(degrees=30, axis=1),
     T.RandomRotate(degrees=30, axis=2),
-    T.RandomShear(5),  # Parameters for RandomShear
-    T.NormalizeScale()  # Normalizing the scale
+    T.RandomShear(5),  
+    T.NormalizeScale() 
 ])
 
 def helper_get_accuracy(opt,model,data_loader,adversarial_attack_model=None):
