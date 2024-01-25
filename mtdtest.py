@@ -18,6 +18,14 @@ import time
 import os
 import os.path as osp
 
+global datasize
+#datasize = 0.001 # 1
+datasize = 1
+data_train_clean_path = 'data/deepgcn/S3DIS/train_clean'
+data_test_clean_path = 'data/deepgcn/S3DIS/test_clean'
+data_train_aug_path = 'data/deepgcn/S3DIS/train_aug'
+data_test_aug_path = 'data/deepgcn/S3DIS/test_aug'
+
 class ColorPerturbation(object):
     def __init__(self, intensity=0.1):
         self.intensity = intensity
@@ -27,16 +35,20 @@ class ColorPerturbation(object):
             data.color = torch.clamp(data.color + perturbation, min=0, max=1)
         return data
 
+class RandomFlip(T.RandomFlip):
+    def __init__(self, p=0.5, axis=0):
+        super().__init__(p=p, axis=axis)
+
 data_augmentation_transformations = T.Compose([
-    ColorPerturbation(0.2),
-    T.RandomJitter(0.03), 
-    T.RandomFlip(0.5),
-    T.RandomScale((0.8, 1.2)),  
-    T.RandomRotate(degrees=30, axis=0), 
-    T.RandomRotate(degrees=30, axis=1),
-    T.RandomRotate(degrees=30, axis=2),
-    T.RandomShear(5),  
-    T.NormalizeScale() 
+    ColorPerturbation(0.05), #(0.2), #(0.2),
+    T.RandomJitter (0.005), # (0.03), #(0.03),  # Parameters for RandomJitter
+    RandomFlip (0.05), # (0.5), #(0.5),  # Parameters for RandomFlip
+    T.RandomScale ((0.05,0.05)), # ((0.8,1.2)), #((0.8, 1.2)),  # Parameters for RandomScale
+    T.RandomRotate(degrees=5, axis=0), # 30 # Parameters for RandomRotate
+    T.RandomRotate(degrees=5, axis=1),
+    T.RandomRotate(degrees=5, axis=2),
+    T.RandomShear(1),  # Parameters for RandomShear
+    T.NormalizeScale()  # Normalizing the scale
 ])
 
 def helper_get_accuracy(opt,model,data_loader,adversarial_attack_model=None):
@@ -98,7 +110,12 @@ def helper_train(optimizer, criterion, opt, model, dataset, adversarial_attack_m
 def child_model_generation(optimizer,criterion,opt,base_model,base_model_acc, test_clean_loader,lamda=0.1, epsilon=0.1, max_acc_loss=0.1, adversarial_attack_model=None):
     # training dataset should be unique for each child, hence shuffle=true
     # testing dataset remains the same
-    train_augmented_dataset = GeoData.S3DIS(opt.data_dir, 5, train=True, pre_transform=data_augmentation_transformations, percentage=0.1)
+    train_augmented_dataset = GeoData.S3DIS(data_train_aug_path, 5, train=True, pre_transform=data_augmentation_transformations)
+    
+    total_size = len(train_augmented_dataset)
+    subset_size = int(datasize*total_size)
+    train_augmented_dataset = train_augmented_dataset[:subset_size]
+    
     train_augmented_loader = DenseDataLoader(train_augmented_dataset, batch_size=opt.batch_size, shuffle=True, num_workers=0)
     child_model = None
     #debug_step12 = 0
@@ -116,17 +133,17 @@ def child_model_generation(optimizer,criterion,opt,base_model,base_model_acc, te
         lamda *= 0.75 # this ensures lamda is not 0 that would result in child_model = base_model
         print('new lambda of child model', lamda)
     # STEP 3: retraining on adversarial data
-    debugbreak = 0
+    #debugbreak = 0
     if adversarial_attack_model:
         child_model = retrain(optimizer, criterion, opt, child_model,train_augmented_loader,test_clean_loader,epsilon=0.1,adversarial_attack_model=adversarial_attack_model)    
         while True:
             acc_s = helper_get_accuracy(child_model,test_clean_loader,opt,adversarial_attack_model=None)
             if base_model_acc - acc_s < max_acc_loss:
                 break
-            debugbreak += 1
-            if debugbreak > 2:
-                print('retrain on advesarial data early break accuracy',acc_s,'accuracy loss from base model', base_model_acc - acc_s)
-                break
+            #debugbreak += 1
+            #if debugbreak > 2:
+            #    print('retrain on advesarial data early break accuracy',acc_s,'accuracy loss from base model', base_model_acc - acc_s)
+            #    break
             child_model = retrain(optimizer, criterion, opt, child_model,train_augmented_loader,test_clean_loader,epsilon=0.1,adversarial_attack_model=None)   
     # for debugging
     if adversarial_attack_model:
@@ -165,7 +182,7 @@ def helper_get_transferability_rate(opt,test_clean_loader):
         correct_labels = np.concatenate((correct_labels, data.y.cpu().numpy()))
     all_checkpoints = []
     for i in range(3):
-        #all_checkpoints.append('child_model_clean_'+str(i)+'.pth')
+        all_checkpoints.append('child_model_clean_'+str(i)+'.pth')
         all_checkpoints.append('child_model_adversarial_'+str(i)+'.pth')
     result = []    
     for i in range(len(all_checkpoints)):
@@ -193,9 +210,19 @@ def helper_get_transferability_rate(opt,test_clean_loader):
 def main():
     opt = OptInit().get_args()
     # load s3dis dataset
-    train_clean_dataset = GeoData.S3DIS(opt.data_dir, 5, train=True, pre_transform=T.NormalizeScale(), percentage=0.1)
+    train_clean_dataset = GeoData.S3DIS(data_train_clean_path, 5, train=True, pre_transform=T.NormalizeScale())
+    
+    total_size = len(train_clean_dataset)
+    subset_size = int(datasize*total_size)
+    train_clean_dataset = train_clean_dataset[:subset_size]
+    
     train_clean_loader = DenseDataLoader(train_clean_dataset, batch_size=opt.batch_size, shuffle=True, num_workers=0)
-    test_clean_dataset = GeoData.S3DIS(opt.data_dir, 5, train=False, pre_transform=T.NormalizeScale(), percentage=0.1)
+    test_clean_dataset = GeoData.S3DIS(data_test_clean_path, 5, train=False, pre_transform=T.NormalizeScale())
+    
+    total_size = len(test_clean_dataset)
+    subset_size = int(datasize*total_size)
+    test_clean_dataset = test_clean_dataset[:subset_size]
+    
     test_clean_loader = DenseDataLoader(test_clean_dataset, batch_size=opt.batch_size, shuffle=False, num_workers=0)
     opt.n_classes = train_clean_loader.dataset.num_classes
     # load base model
@@ -213,9 +240,9 @@ def main():
     print('base model accuracy on clean data-',base_model_accuracy)
     # generate save 3 child_models trained on augmented data & adversarial data
     for i in range(3):
-        #child_model_clean = child_model_generation(optimizer,criterion,opt,base_model,base_model_accuracy, test_clean_loader,lamda=0.1, epsilon=0.1, max_acc_loss=0.1, adversarial_attack_model=None)
-        #torch.save(child_model_clean.state_dict(),'child_model_clean_' + str(i) +'.pth')
-        child_model_adversarial = child_model_generation(optimizer,criterion,opt,base_model,base_model_accuracy, test_clean_loader,lamda=0.1, epsilon=0.1, max_acc_loss=0.1, adversarial_attack_model=adversarial_attack_model)
+        child_model_clean = child_model_generation(optimizer,criterion,opt,base_model,base_model_accuracy, test_clean_loader,lamda=0.1, epsilon=0.05, max_acc_loss=0.5, adversarial_attack_model=None)
+        torch.save(child_model_clean.state_dict(),'child_model_clean_' + str(i) +'.pth')
+        child_model_adversarial = child_model_generation(optimizer,criterion,opt,base_model,base_model_accuracy, test_clean_loader,lamda=0.05, epsilon=0.3, max_acc_loss=0.5, adversarial_attack_model=adversarial_attack_model)
         torch.save(child_model_adversarial.state_dict(),'child_model_adversarial_' + str(i) +'.pth')
     helper_get_transferability_rate(opt,test_clean_loader)
 
